@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 if torch.cuda.is_available():
     print('GPU is available with the following device: {}'.format(torch.cuda.get_device_name()))
 else:
-    print('CPU is not available')
+    print('GPU is not available')
 
 torch.manual_seed(10)
 
@@ -67,13 +67,13 @@ def show_images(x, x_hat):
 
         fig.add_subplot(1, 2, 1)
 
-        plt.imshow(x.cpu()[i, 0, :, :])
+        plt.imshow(x.cpu()[i, 0, :, :], cmap='gray')
         plt.axis('off')
         plt.title('x')
 
         fig.add_subplot(1, 2, 2)
 
-        plt.imshow(x_hat.cpu().detach().numpy()[i, 0, :, :])
+        plt.imshow(x_hat.cpu().detach().numpy()[i, 0, :, :], cmap='gray')
         plt.axis('off')
         plt.title('x_hat')
 
@@ -86,13 +86,13 @@ def show_latent_features(model):
         z = 10 * F.one_hot(torch.tensor(i), num_classes=16).float().reshape((1, 16)).to(device)
         x_hat = model.decoder(z)
         fig.add_subplot(4, 4, i+1)
-        plt.imshow(x_hat.cpu().detach().numpy()[0, 0, :, :])
+        plt.imshow(x_hat.cpu().detach().numpy()[0, 0, :, :], cmap='gray')
         plt.axis('off')
         plt.title('latent feature {}'.format(i+1))
     fig.show()
 
 
-def train_epoch(model, device, data_loader, optimizer):
+def train_epoch(model, device, data_loader, optimizer, beta, _lambda):
     model.train()
 
     train_loss = 0
@@ -100,14 +100,17 @@ def train_epoch(model, device, data_loader, optimizer):
     for x, _ in data_loader:
         x = x.to(device)
         z, x_hat = model(x)
-        loss = ((x - x_hat).square()).sum(axis=(2, 3)).mean()
+
+        loss_rec = ((x - x_hat).square()).sum(axis=(2, 3)).mean()
+        loss_rae = (z.square()).sum(axis=1).mean()
+
+        total_loss = loss_rec + beta * loss_rae
 
         optimizer.zero_grad()
-        loss.backward()
+        total_loss.backward()
         optimizer.step()
 
-        # print('\t partial train loss (single batch): %f' % (loss.item()))
-        train_loss += loss.item()
+        train_loss += total_loss.item()
 
     return train_loss / len(data_loader.dataset)
 
@@ -130,6 +133,6 @@ for epoch in range(epochs):
     # show_images(x, x_hat)
 
     print(z)
-    train_loss = train_epoch(model, device, train_loader, optimizer)
+    train_loss = train_epoch(model, device, train_loader, optimizer, beta=1e-4, _lambda=1)
     show_latent_features(model)
-    print('\n EPOCH {}/{} \t train loss {:.3f}'.format(epoch + 1, epochs, train_loss))
+    print('\n EPOCH {}/{} \t train loss {:.4f}'.format(epoch + 1, epochs, train_loss))
