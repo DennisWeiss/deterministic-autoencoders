@@ -1,3 +1,5 @@
+import random
+
 import torch.nn.functional as F
 import torch.utils.data
 import matplotlib.pyplot as plt
@@ -12,6 +14,8 @@ MODEL = rae_mnist.RAE_MNIST
 DATA_LOADERS = data_loader.load_mnist_data
 NUM_EPOCHS = 20
 LOAD_MODEL_SNAPSHOT = True
+TRAIN_BATCH_SIZE = 256
+TEST_BATCH_SIZE = 32
 
 torch.manual_seed(10)
 
@@ -44,6 +48,8 @@ def show_images(x, x_hat):
 
 
 def show_latent_features(model):
+    model.eval()
+
     fig = plt.figure(figsize=(16, 16))
     for i in range(16):
         z = 10 * F.one_hot(torch.tensor(i), num_classes=16).float().reshape((1, 16)).to(device)
@@ -53,6 +59,36 @@ def show_latent_features(model):
         plt.axis('off')
         plt.title('latent feature {}'.format(i+1))
     fig.show()
+
+
+def show_morphing_effect(model, x1, x2, n=10):
+    model.eval()
+
+    fig = plt.figure(figsize=(2*(n+1), 2))
+    z1, x1_hat = model(x1)
+    z2, x2_hat = model(x2)
+
+    fig.add_subplot(1, n+1, 1)
+    plt.imshow(x1_hat.cpu().detach().numpy()[0, 0, :, :])
+    plt.axis('off')
+
+    for i in range(1, n):
+        x_hat = model.decoder(torch.lerp(z1, z2, i/n))
+        fig.add_subplot(1, n+1, i+1)
+        plt.imshow(x_hat.cpu().detach().numpy()[0, 0, :, :])
+        plt.axis('off')
+
+    fig.add_subplot(1, n+1, n+1)
+    plt.imshow(x2_hat.cpu().detach().numpy()[0, 0, :, :])
+    plt.axis('off')
+
+    fig.show()
+
+
+def show_morphing_effect_of_samples(model, x, n=10):
+    for i in range(x.shape[0] - 1):
+        show_morphing_effect(model, x[i:i+1, :, :, :], x[i+1:i+2, :, :, :], n)
+
 
 
 def train_epoch(model, device, data_loader, optimizer, beta, _lambda):
@@ -95,13 +131,23 @@ if LOAD_MODEL_SNAPSHOT:
         start_epoch = 1
         print('Could not load model snapshot. Starting with epoch 1')
 
-train_loader, test_loader = DATA_LOADERS()
+train_loader, test_loader = DATA_LOADERS(TRAIN_BATCH_SIZE, TEST_BATCH_SIZE)
 
 test_x, _ = next(iter(test_loader))
 
 for epoch in range(start_epoch, start_epoch + NUM_EPOCHS):
     test_x = test_x.to(device)
     test_z, test_x_hat = model(test_x)
+
+    model.eval()
+
+    show_latent_features(model)
+    show_images(test_x, test_x_hat)
+    x1_idx = random.randint(0, TEST_BATCH_SIZE)
+    x2_idx = random.randint(0, TEST_BATCH_SIZE)
+    show_morphing_effect_of_samples(model, test_x)
+
+    model.train()
 
     train_loss = train_epoch(model, device, train_loader, optimizer, beta=1e-4, _lambda=1e-7)
 
@@ -111,6 +157,4 @@ for epoch in range(start_epoch, start_epoch + NUM_EPOCHS):
         'optimizer_state_dict': optimizer.state_dict()
     }, 'model_snapshots/{}_{}'.format(DATASET_NAME, MODEL.__name__))
 
-    show_latent_features(model)
-    show_images(test_x, test_x_hat)
     print('\n EPOCH {}/{} \t train loss {:.4f}'.format(epoch, start_epoch + NUM_EPOCHS - 1, train_loss))
