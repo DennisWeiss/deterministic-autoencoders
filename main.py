@@ -46,7 +46,7 @@ def show_images(x, x_hat):
 def show_latent_features(model):
     fig = plt.figure(figsize=(16, 16))
     for i in range(16):
-        z = F.one_hot(torch.tensor(i), num_classes=16).float().reshape((1, 16)).to(device)
+        z = 10 * F.one_hot(torch.tensor(i), num_classes=16).float().reshape((1, 16)).to(device)
         x_hat = model.decoder(z)
         fig.add_subplot(4, 4, i+1)
         plt.imshow(x_hat.cpu().detach().numpy()[0, 0, :, :])
@@ -89,7 +89,7 @@ if LOAD_MODEL_SNAPSHOT:
         snapshot = torch.load('model_snapshots/{}_{}'.format(DATASET_NAME, MODEL.__name__))
         model.load_state_dict(snapshot['model_state_dict'])
         optimizer.load_state_dict(snapshot['optimizer_state_dict'])
-        start_epoch = snapshot['epoch']
+        start_epoch = snapshot['epoch'] + 1
         print('Successfully loaded model from snapshot. Starting with epoch {}'.format(start_epoch))
     except:
         start_epoch = 1
