@@ -1,21 +1,25 @@
-import random
+from tqdm import tqdm
 
 import torch.nn.functional as F
 import torch.utils.data
 import matplotlib.pyplot as plt
 
-from models import rae_mnist
+from models import rae_mnist, rae_celeba
 from data_loaders import data_loader
 
 
 # CONFIG
-DATASET_NAME = 'MNIST'
-MODEL = rae_mnist.RAE_MNIST
-DATA_LOADERS = data_loader.load_mnist_data
+DATASET_NAME = 'CelebA'
+MODEL = rae_celeba.RAE_CelebA
+DATA_LOADERS = data_loader.load_celeba_data
 NUM_EPOCHS = 20
 LOAD_MODEL_SNAPSHOT = True
 TRAIN_BATCH_SIZE = 256
 TEST_BATCH_SIZE = 32
+INITIAL_LEARNING_RATE = 1e-3
+EMBEDDING_LOSS_WEIGHT = 1e-4
+REGULARIZER_LOSS_WEIGHT = 1e-7
+
 
 torch.manual_seed(10)
 
@@ -34,13 +38,13 @@ def show_images(x, x_hat):
 
         fig.add_subplot(1, 2, 1)
 
-        plt.imshow(x.cpu()[i, 0, :, :])
+        plt.imshow(torch.transpose(torch.transpose(x[i, :, :, :], 1, 2), 0, 2).cpu())
         plt.axis('off')
         plt.title('x')
 
         fig.add_subplot(1, 2, 2)
 
-        plt.imshow(x_hat.cpu().detach().numpy()[i, 0, :, :])
+        plt.imshow(torch.transpose(torch.transpose(torch.clip(x_hat[i, :, :, :], 1, 2), 0, 1), 0, 2).cpu().detach().numpy())
         plt.axis('off')
         plt.title('x_hat')
 
@@ -69,17 +73,17 @@ def show_morphing_effect(model, x1, x2, n=10):
     z2, x2_hat = model(x2)
 
     fig.add_subplot(1, n+1, 1)
-    plt.imshow(x1_hat.cpu().detach().numpy()[0, 0, :, :])
+    plt.imshow(torch.transpose(torch.transpose(torch.clip(x1_hat, 0, 1), 2, 3), 1, 3).cpu().detach().numpy()[0, :, :, :])
     plt.axis('off')
 
     for i in range(1, n):
         x_hat = model.decoder(torch.lerp(z1, z2, i/n))
         fig.add_subplot(1, n+1, i+1)
-        plt.imshow(x_hat.cpu().detach().numpy()[0, 0, :, :])
+        plt.imshow(torch.transpose(torch.transpose(torch.clip(x_hat, 0, 1), 2, 3), 1, 3).cpu().detach().numpy()[0, :, :, :])
         plt.axis('off')
 
     fig.add_subplot(1, n+1, n+1)
-    plt.imshow(x2_hat.cpu().detach().numpy()[0, 0, :, :])
+    plt.imshow(torch.transpose(torch.transpose(torch.clip(x2_hat, 0, 1), 2, 3), 1, 3).cpu().detach().numpy()[0, :, :, :])
     plt.axis('off')
 
     fig.show()
@@ -90,13 +94,15 @@ def show_morphing_effect_of_samples(model, x, n=10):
         show_morphing_effect(model, x[i:i+1, :, :, :], x[i+1:i+2, :, :, :], n)
 
 
-
 def train_epoch(model, device, data_loader, optimizer, beta, _lambda):
     model.train()
 
-    train_loss = 0
+    train_total_loss = 0
+    train_loss_rec = 0
+    train_loss_rae = 0
+    train_loss_reg = 0
 
-    for x, _ in data_loader:
+    for x, _ in tqdm(data_loader, desc='Epoch {}/{}'.format(epoch, start_epoch + NUM_EPOCHS - 1), unit='batch', colour='blue'):
         x = x.to(device)
         z, x_hat = model(x)
 
@@ -110,13 +116,17 @@ def train_epoch(model, device, data_loader, optimizer, beta, _lambda):
         total_loss.backward()
         optimizer.step()
 
-        train_loss += total_loss.item()
+        train_total_loss += total_loss.item()
+        train_loss_rec += loss_rec.item()
+        train_loss_rae += loss_rae.item()
+        train_loss_reg += loss_reg.item()
 
-    return train_loss / len(data_loader.dataset)
+    return train_total_loss / len(data_loader.dataset), train_loss_rec / len(data_loader.dataset), \
+           train_loss_rae / len(data_loader.dataset), train_loss_reg / len(data_loader.dataset)
 
 
 model = MODEL().to(device)
-optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+optimizer = torch.optim.Adam(model.parameters(), lr=INITIAL_LEARNING_RATE)
 
 start_epoch = 1
 
@@ -141,15 +151,13 @@ for epoch in range(start_epoch, start_epoch + NUM_EPOCHS):
 
     model.eval()
 
-    show_latent_features(model)
-    show_images(test_x, test_x_hat)
-    x1_idx = random.randint(0, TEST_BATCH_SIZE)
-    x2_idx = random.randint(0, TEST_BATCH_SIZE)
+    # show_latent_features(model)
+    # show_images(test_x, test_x_hat)
     show_morphing_effect_of_samples(model, test_x)
 
     model.train()
 
-    train_loss = train_epoch(model, device, train_loader, optimizer, beta=1e-4, _lambda=1e-7)
+    train_total_loss, train_loss_rec, train_loss_rae, train_loss_reg = train_epoch(model, device, train_loader, optimizer, beta=EMBEDDING_LOSS_WEIGHT, _lambda=REGULARIZER_LOSS_WEIGHT)
 
     torch.save({
         'epoch': epoch,
@@ -157,4 +165,4 @@ for epoch in range(start_epoch, start_epoch + NUM_EPOCHS):
         'optimizer_state_dict': optimizer.state_dict()
     }, 'model_snapshots/{}_{}'.format(DATASET_NAME, MODEL.__name__))
 
-    print('\n EPOCH {}/{} \t train loss {:.4f}'.format(epoch, start_epoch + NUM_EPOCHS - 1, train_loss))
+    print('\n EPOCH {}/{} \t train: total loss {:.4f} \t loss_rec {:.4f} \t loss_rae {:.4f} \t loss_reg {:.4f}'.format(epoch, start_epoch + NUM_EPOCHS - 1, train_total_loss, train_loss_rec, train_loss_rae, train_loss_reg))
