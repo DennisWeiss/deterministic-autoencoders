@@ -6,13 +6,15 @@ import matplotlib.pyplot as plt
 
 from models import rae_mnist, rae_celeba
 from data_loaders import data_loader
+from util import util
 
 
 # CONFIG
+USE_CUDA_IF_AVAILABLE = True
 DATASET_NAME = 'CelebA'
 MODEL = rae_celeba.RAE_CelebA
 DATA_LOADERS = data_loader.load_celeba_data
-NUM_EPOCHS = 20
+NUM_EPOCHS = 40
 LOAD_MODEL_SNAPSHOT = True
 TRAIN_BATCH_SIZE = 256
 TEST_BATCH_SIZE = 32
@@ -21,14 +23,14 @@ EMBEDDING_LOSS_WEIGHT = 1e-4
 REGULARIZER_LOSS_WEIGHT = 1e-7
 
 
-torch.manual_seed(10)
+# torch.manual_seed(10)
 
 if torch.cuda.is_available():
     print('GPU is available with the following device: {}'.format(torch.cuda.get_device_name()))
 else:
     print('GPU is not available')
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+device = torch.device('cuda' if USE_CUDA_IF_AVAILABLE and torch.cuda.is_available() else 'cpu')
 print('The model will run with {}'.format(device))
 
 
@@ -44,7 +46,7 @@ def show_images(x, x_hat):
 
         fig.add_subplot(1, 2, 2)
 
-        plt.imshow(torch.transpose(torch.transpose(torch.clip(x_hat[i, :, :, :], 1, 2), 0, 1), 0, 2).cpu().detach().numpy())
+        plt.imshow(torch.transpose(torch.transpose(torch.clip(x_hat[i, :, :, :], 0, 1), 1, 2), 0, 2).cpu().detach().numpy())
         plt.axis('off')
         plt.title('x_hat')
 
@@ -65,33 +67,9 @@ def show_latent_features(model):
     fig.show()
 
 
-def show_morphing_effect(model, x1, x2, n=10):
-    model.eval()
-
-    fig = plt.figure(figsize=(2*(n+1), 2))
-    z1, x1_hat = model(x1)
-    z2, x2_hat = model(x2)
-
-    fig.add_subplot(1, n+1, 1)
-    plt.imshow(torch.transpose(torch.transpose(torch.clip(x1_hat, 0, 1), 2, 3), 1, 3).cpu().detach().numpy()[0, :, :, :])
-    plt.axis('off')
-
-    for i in range(1, n):
-        x_hat = model.decoder(torch.lerp(z1, z2, i/n))
-        fig.add_subplot(1, n+1, i+1)
-        plt.imshow(torch.transpose(torch.transpose(torch.clip(x_hat, 0, 1), 2, 3), 1, 3).cpu().detach().numpy()[0, :, :, :])
-        plt.axis('off')
-
-    fig.add_subplot(1, n+1, n+1)
-    plt.imshow(torch.transpose(torch.transpose(torch.clip(x2_hat, 0, 1), 2, 3), 1, 3).cpu().detach().numpy()[0, :, :, :])
-    plt.axis('off')
-
-    fig.show()
-
-
 def show_morphing_effect_of_samples(model, x, n=10):
     for i in range(x.shape[0] - 1):
-        show_morphing_effect(model, x[i:i+1, :, :, :], x[i+1:i+2, :, :, :], n)
+        util.show_morphing_effect(model, x[i:i+1, :, :, :], x[i+1:i+2, :, :, :], n)
 
 
 def train_epoch(model, device, data_loader, optimizer, beta, _lambda):
@@ -152,7 +130,7 @@ for epoch in range(start_epoch, start_epoch + NUM_EPOCHS):
     model.eval()
 
     # show_latent_features(model)
-    # show_images(test_x, test_x_hat)
+    show_images(test_x, test_x_hat)
     show_morphing_effect_of_samples(model, test_x)
 
     model.train()
@@ -165,4 +143,4 @@ for epoch in range(start_epoch, start_epoch + NUM_EPOCHS):
         'optimizer_state_dict': optimizer.state_dict()
     }, 'model_snapshots/{}_{}'.format(DATASET_NAME, MODEL.__name__))
 
-    print('\n EPOCH {}/{} \t train: total loss {:.4f} \t loss_rec {:.4f} \t loss_rae {:.4f} \t loss_reg {:.4f}'.format(epoch, start_epoch + NUM_EPOCHS - 1, train_total_loss, train_loss_rec, train_loss_rae, train_loss_reg))
+    print('EPOCH {}/{} \t train: total loss {:.4f} \t loss_rec {:.4f} \t loss_rae {:.4f} \t loss_reg {:.4f}\n'.format(epoch, start_epoch + NUM_EPOCHS - 1, train_total_loss, train_loss_rec, train_loss_rae, train_loss_reg))

@@ -3,8 +3,8 @@ import torchvision
 
 
 def load_mnist_data(train_batch_size, test_batch_size):
-    train_data = torchvision.datasets.MNIST('dataset\\train', train=True, download=True)
-    test_data = torchvision.datasets.MNIST('dataset\\test', train=False, download=True)
+    train_data = torchvision.datasets.MNIST('dataset/train', train=True, download=True)
+    test_data = torchvision.datasets.MNIST('dataset/test', train=False, download=True)
 
     for data in [train_data, test_data]:
         data.transform = torchvision.transforms.Compose(
@@ -18,8 +18,8 @@ def load_mnist_data(train_batch_size, test_batch_size):
 
 
 def load_celeba_data(train_batch_size, test_batch_size):
-    train_data = torchvision.datasets.CelebA('dataset\\train', split='train', download=True)
-    test_data = torchvision.datasets.CelebA('dataset\\test', split='test', download=True)
+    train_data = torchvision.datasets.CelebA('dataset/train', split='train', download=True)
+    test_data = torchvision.datasets.CelebA('dataset/test', split='test', download=True)
 
     for data in [train_data, test_data]:
         data.transform = torchvision.transforms.Compose(
