@@ -1,8 +1,11 @@
+import numpy as np
 from tqdm import tqdm
 
 import torch.nn.functional as F
 import torch.utils.data
 import matplotlib.pyplot as plt
+import pandas as pd
+from sklearn.mixture import GaussianMixture
 
 from models import rae_mnist, rae_celeba
 from data_loaders import data_loader
@@ -10,17 +13,17 @@ from util import util
 
 
 # CONFIG
-USE_CUDA_IF_AVAILABLE = True
+USE_CUDA_IF_AVAILABLE = False
 DATASET_NAME = 'CelebA'
 MODEL = rae_celeba.RAE_CelebA
 DATA_LOADERS = data_loader.load_celeba_data
 NUM_EPOCHS = 40
 LOAD_MODEL_SNAPSHOT = True
-TRAIN_BATCH_SIZE = 256
-TEST_BATCH_SIZE = 32
+TRAIN_BATCH_SIZE = 128
+TEST_BATCH_SIZE = 31
 INITIAL_LEARNING_RATE = 1e-3
-EMBEDDING_LOSS_WEIGHT = 1e-4
-REGULARIZER_LOSS_WEIGHT = 1e-7
+EMBEDDING_LOSS_WEIGHT =1e-2
+REGULARIZER_LOSS_WEIGHT = 1e-3
 
 
 # torch.manual_seed(10)
@@ -33,6 +36,17 @@ else:
 device = torch.device('cuda' if USE_CUDA_IF_AVAILABLE and torch.cuda.is_available() else 'cpu')
 print('The model will run with {}'.format(device))
 
+
+def show_image(x):
+    fig = plt.figure(figsize=(20, 20))
+    for i in range(x.shape[0]):
+
+        fig.add_subplot(8, 8, i+1)
+
+        plt.imshow(torch.transpose(torch.transpose(torch.clip(x[i, :, :, :], 0, 1), 1, 2), 0, 2).cpu().detach().numpy())
+        plt.axis('off')
+
+    fig.show()
 
 def show_images(x, x_hat):
     for i in range(x.shape[0]):
@@ -56,9 +70,9 @@ def show_images(x, x_hat):
 def show_latent_features(model):
     model.eval()
 
-    fig = plt.figure(figsize=(16, 16))
+    fig = plt.figure(figsize=(8, 8))
     for i in range(16):
-        z = 10 * F.one_hot(torch.tensor(i), num_classes=16).float().reshape((1, 16)).to(device)
+        z = 5 * F.one_hot(torch.tensor(i), num_classes=16).float().reshape((1, 16)).to(device)
         x_hat = model.decoder(z)
         fig.add_subplot(4, 4, i+1)
         plt.imshow(x_hat.cpu().detach().numpy()[0, 0, :, :])
@@ -68,8 +82,20 @@ def show_latent_features(model):
 
 
 def show_morphing_effect_of_samples(model, x, n=10):
-    for i in range(x.shape[0] - 1):
-        util.show_morphing_effect(model, x[i:i+1, :, :, :], x[i+1:i+2, :, :, :], n)
+    for i in np.arange(0, x.shape[0] - 1, 15):
+        util.show_morphing_effect(model, x[i:i+15, :, :, :], x[i+1:i+16, :, :, :], n)
+
+
+def get_loss_rec(x, x_hat):
+    return ((x - x_hat).square()).sum(axis=(2, 3)).mean()
+
+
+def get_loss_rae(z):
+    return (z.square()).sum(axis=1).mean()
+
+
+def get_loss_reg(model):
+    return sum(parameter.square().sum() for parameter in model.parameters())
 
 
 def train_epoch(model, device, data_loader, optimizer, beta, _lambda):
@@ -84,9 +110,9 @@ def train_epoch(model, device, data_loader, optimizer, beta, _lambda):
         x = x.to(device)
         z, x_hat = model(x)
 
-        loss_rec = ((x - x_hat).square()).sum(axis=(2, 3)).mean()
-        loss_rae = (z.square()).sum(axis=1).mean()
-        loss_reg = sum(parameter.square().sum() for parameter in model.parameters())
+        loss_rec = get_loss_rec(x, x_hat)
+        loss_rae = get_loss_rae(z)
+        loss_reg = get_loss_reg(model)
 
         total_loss = loss_rec + beta * loss_rae + _lambda * loss_reg
 
@@ -122,20 +148,42 @@ if LOAD_MODEL_SNAPSHOT:
 train_loader, test_loader = DATA_LOADERS(TRAIN_BATCH_SIZE, TEST_BATCH_SIZE)
 
 test_x, _ = next(iter(test_loader))
+test_x = test_x.to(device)
+
+loss_values = pd.DataFrame(columns=['epoch', 'train_loss_rec', 'loss_rae', 'loss_reg', 'train_total_loss', 'test_loss_rec'])
+
+model.eval()
+
+gmm_train_loader, gmm_test_loader = DATA_LOADERS(5_000, 64)
+gmm_train_data, _ = next(iter(gmm_train_loader))
+gmm_train_data = gmm_train_data.to(device)
+gmm_z, _ = model(gmm_train_data)
+gmm_z = gmm_z.detach().numpy()
+print(gmm_z.shape)
+gm = GaussianMixture(n_components=10).fit(gmm_z)
+
+latent_samples = torch.from_numpy(gm.sample(64)[0]).float()
+
+gmm_test_data, _ = next(iter(gmm_test_loader))
+gmm_test_data = gmm_test_data.to(device)
+gmm_test_z, gmm_test_x_hat = model(gmm_test_data)
+generated_samples = model.decoder(latent_samples)
+
+# show_image(gmm_test_x_hat)
+show_image(generated_samples)
 
 for epoch in range(start_epoch, start_epoch + NUM_EPOCHS):
-    test_x = test_x.to(device)
-    test_z, test_x_hat = model(test_x)
-
     model.eval()
 
+    # test_z, test_x_hat = model(test_x)
+
     # show_latent_features(model)
-    show_images(test_x, test_x_hat)
-    show_morphing_effect_of_samples(model, test_x)
+    # show_images(test_x, test_x_hat)
+    # show_morphing_effect_of_samples(model, test_x)
 
     model.train()
 
-    train_total_loss, train_loss_rec, train_loss_rae, train_loss_reg = train_epoch(model, device, train_loader, optimizer, beta=EMBEDDING_LOSS_WEIGHT, _lambda=REGULARIZER_LOSS_WEIGHT)
+    train_total_loss, train_loss_rec, loss_rae, loss_reg = train_epoch(model, device, train_loader, optimizer, beta=EMBEDDING_LOSS_WEIGHT, _lambda=REGULARIZER_LOSS_WEIGHT)
 
     torch.save({
         'epoch': epoch,
@@ -143,4 +191,20 @@ for epoch in range(start_epoch, start_epoch + NUM_EPOCHS):
         'optimizer_state_dict': optimizer.state_dict()
     }, 'model_snapshots/{}_{}'.format(DATASET_NAME, MODEL.__name__))
 
-    print('EPOCH {}/{} \t train: total loss {:.4f} \t loss_rec {:.4f} \t loss_rae {:.4f} \t loss_reg {:.4f}\n'.format(epoch, start_epoch + NUM_EPOCHS - 1, train_total_loss, train_loss_rec, train_loss_rae, train_loss_reg))
+    model.eval()
+
+    test_loss_rec = 0
+
+    for test_x, _ in test_loader:
+        test_x = test_x.to(device)
+        test_z, test_x_hat = model(test_x)
+
+        test_loss_rec += get_loss_rec(test_x, test_x_hat).item()
+
+    test_loss_rec /= len(test_loader.dataset)
+
+    loss_values.loc[epoch-1] = {'epoch': epoch, 'train_loss_rec': train_loss_rec, 'loss_rae': loss_rae, 'loss_reg': loss_reg, 'train_total_loss': train_total_loss, 'test_loss_rec': test_loss_rec}
+
+    print('EPOCH {}/{} \t train: total loss {:.4f} \t loss_rec {:.4f} \t loss_rae {:.4f} \t loss_reg {:.4f}\n'.format(epoch, start_epoch + NUM_EPOCHS - 1, train_total_loss, train_loss_rec, loss_rae, loss_reg))
+
+loss_values.to_csv('loss_values_{}.csv'.format(DATASET_NAME), index=False)
