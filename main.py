@@ -5,7 +5,6 @@ import torch.nn.functional as F
 import torch.utils.data
 import matplotlib.pyplot as plt
 import pandas as pd
-from sklearn.mixture import GaussianMixture
 
 from models import rae_mnist, rae_celeba
 from data_loaders import data_loader
@@ -13,17 +12,21 @@ from util import util
 
 
 # CONFIG
-USE_CUDA_IF_AVAILABLE = False
+USE_CUDA_IF_AVAILABLE = True
 DATASET_NAME = 'CelebA'
 MODEL = rae_celeba.RAE_CelebA
 DATA_LOADERS = data_loader.load_celeba_data
 NUM_EPOCHS = 40
 LOAD_MODEL_SNAPSHOT = True
 TRAIN_BATCH_SIZE = 128
-TEST_BATCH_SIZE = 31
+TEST_BATCH_SIZE = 32
 INITIAL_LEARNING_RATE = 1e-3
 EMBEDDING_LOSS_WEIGHT =1e-2
 REGULARIZER_LOSS_WEIGHT = 1e-3
+SAVE_LOSS_VALUES_TO_CSV = False
+SHOW_LATENT_FEATURES = False
+SHOW_ORIGINAL_AND_RECONSTRUCTED_IMAGES = False
+SHOW_MORPHING_EFFECT = True
 
 
 # torch.manual_seed(10)
@@ -36,17 +39,6 @@ else:
 device = torch.device('cuda' if USE_CUDA_IF_AVAILABLE and torch.cuda.is_available() else 'cpu')
 print('The model will run with {}'.format(device))
 
-
-def show_image(x):
-    fig = plt.figure(figsize=(20, 20))
-    for i in range(x.shape[0]):
-
-        fig.add_subplot(8, 8, i+1)
-
-        plt.imshow(torch.transpose(torch.transpose(torch.clip(x[i, :, :, :], 0, 1), 1, 2), 0, 2).cpu().detach().numpy())
-        plt.axis('off')
-
-    fig.show()
 
 def show_images(x, x_hat):
     for i in range(x.shape[0]):
@@ -82,7 +74,8 @@ def show_latent_features(model):
 
 
 def show_morphing_effect_of_samples(model, x, n=10):
-    for i in np.arange(0, x.shape[0] - 1, 15):
+    for i in np.arange(0, x.shape[0] - 16, 15):
+        print(i)
         util.show_morphing_effect(model, x[i:i+15, :, :, :], x[i+1:i+16, :, :, :], n)
 
 
@@ -147,39 +140,24 @@ if LOAD_MODEL_SNAPSHOT:
 
 train_loader, test_loader = DATA_LOADERS(TRAIN_BATCH_SIZE, TEST_BATCH_SIZE)
 
-test_x, _ = next(iter(test_loader))
-test_x = test_x.to(device)
+test_x_visualization, _ = next(iter(test_loader))
+test_x_visualization = test_x_visualization.to(device)
+
 
 loss_values = pd.DataFrame(columns=['epoch', 'train_loss_rec', 'loss_rae', 'loss_reg', 'train_total_loss', 'test_loss_rec'])
 
-model.eval()
-
-gmm_train_loader, gmm_test_loader = DATA_LOADERS(5_000, 64)
-gmm_train_data, _ = next(iter(gmm_train_loader))
-gmm_train_data = gmm_train_data.to(device)
-gmm_z, _ = model(gmm_train_data)
-gmm_z = gmm_z.detach().numpy()
-print(gmm_z.shape)
-gm = GaussianMixture(n_components=10).fit(gmm_z)
-
-latent_samples = torch.from_numpy(gm.sample(64)[0]).float()
-
-gmm_test_data, _ = next(iter(gmm_test_loader))
-gmm_test_data = gmm_test_data.to(device)
-gmm_test_z, gmm_test_x_hat = model(gmm_test_data)
-generated_samples = model.decoder(latent_samples)
-
-# show_image(gmm_test_x_hat)
-show_image(generated_samples)
 
 for epoch in range(start_epoch, start_epoch + NUM_EPOCHS):
     model.eval()
 
-    # test_z, test_x_hat = model(test_x)
+    test_z_visualization, test_x_hat_visualization = model(test_x_visualization)
 
-    # show_latent_features(model)
-    # show_images(test_x, test_x_hat)
-    # show_morphing_effect_of_samples(model, test_x)
+    if DATASET_NAME == 'MNIST' and SHOW_LATENT_FEATURES:
+        show_latent_features(model)
+    if SHOW_ORIGINAL_AND_RECONSTRUCTED_IMAGES:
+        show_images(test_x_visualization, test_x_hat_visualization)
+    if SHOW_MORPHING_EFFECT:
+        show_morphing_effect_of_samples(model, test_x_visualization)
 
     model.train()
 
@@ -203,8 +181,10 @@ for epoch in range(start_epoch, start_epoch + NUM_EPOCHS):
 
     test_loss_rec /= len(test_loader.dataset)
 
-    loss_values.loc[epoch-1] = {'epoch': epoch, 'train_loss_rec': train_loss_rec, 'loss_rae': loss_rae, 'loss_reg': loss_reg, 'train_total_loss': train_total_loss, 'test_loss_rec': test_loss_rec}
+    if SAVE_LOSS_VALUES_TO_CSV:
+        loss_values.loc[epoch-1] = {'epoch': epoch, 'train_loss_rec': train_loss_rec, 'loss_rae': loss_rae, 'loss_reg': loss_reg, 'train_total_loss': train_total_loss, 'test_loss_rec': test_loss_rec}
 
-    print('EPOCH {}/{} \t train: total loss {:.4f} \t loss_rec {:.4f} \t loss_rae {:.4f} \t loss_reg {:.4f}\n'.format(epoch, start_epoch + NUM_EPOCHS - 1, train_total_loss, train_loss_rec, loss_rae, loss_reg))
+    print('EPOCH {}/{} \t train: total loss {:.4f} \t loss_rec {:.4f} \t loss_rae {:.4f} \t loss_reg {:.4f} \t test: loss_rev {:.4f}\n'.format(epoch, start_epoch + NUM_EPOCHS - 1, train_total_loss, train_loss_rec, loss_rae, loss_reg, test_loss_rec))
 
-loss_values.to_csv('loss_values_{}.csv'.format(DATASET_NAME), index=False)
+if SAVE_LOSS_VALUES_TO_CSV:
+    loss_values.to_csv('loss_values_{}.csv'.format(DATASET_NAME), index=False)
