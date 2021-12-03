@@ -8,7 +8,7 @@ from models import rae_celeba
 MODEL = rae_celeba.RAE_CelebA
 DATA_LOADERS = data_loader.load_celeba_data
 DATASET = 'CelebA'
-USE_CUDA_IF_AVAILABLE = True
+USE_CUDA_IF_AVAILABLE = False
 
 if torch.cuda.is_available():
     print('GPU is available with the following device: {}'.format(torch.cuda.get_device_name()))
@@ -23,7 +23,7 @@ def show_image(x):
     fig = plt.figure(figsize=(20, 20))
     for i in range(x.shape[0]):
 
-        fig.add_subplot(8, 8, i+1)
+        fig.add_subplot(5, 5, i+1)
 
         plt.imshow(torch.transpose(torch.transpose(torch.clip(x[i, :, :, :], 0, 1), 1, 2), 0, 2).cpu().detach().numpy())
         plt.axis('off')
@@ -46,7 +46,7 @@ gmm_z = gmm_z.detach().numpy()
 print(gmm_z.shape)
 gm = GaussianMixture(n_components=10).fit(gmm_z)
 
-latent_samples = torch.from_numpy(gm.sample(64)[0]).float()
+latent_samples = torch.from_numpy(gm.sample(25)[0]).float()
 
 gmm_test_data, _ = next(iter(gmm_test_loader))
 gmm_test_data = gmm_test_data.to(device)

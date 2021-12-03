@@ -73,10 +73,10 @@ def show_latent_features(model):
     fig.show()
 
 
-def show_morphing_effect_of_samples(model, x, n=10):
-    for i in np.arange(0, x.shape[0] - 16, 15):
+def show_morphing_effect_of_samples(model, x, n=8):
+    for i in np.arange(0, x.shape[0] - 11, 10):
         print(i)
-        util.show_morphing_effect(model, x[i:i+15, :, :, :], x[i+1:i+16, :, :, :], n)
+        util.show_morphing_effect(model, x[i:i+10, :, :, :], x[i+1:i+11, :, :, :], n)
 
 
 def get_loss_rec(x, x_hat):
